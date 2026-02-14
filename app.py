@@ -5,6 +5,9 @@ from urllib.parse import urlparse, parse_qs
 import datetime
 import pandas as pd
 import time
+import requests
+import http.cookiejar
+import os
 
 # --- 関数定義 ---
 def extract_video_id(url):
@@ -33,14 +36,36 @@ def format_timestamp(seconds):
     """秒数を HH:MM:SS 形式に変換する"""
     return str(datetime.timedelta(seconds=int(seconds)))
 
+def fetch_video_title(session, video_id):
+    """YouTubeのページからタイトルを取得する"""
+    try:
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        response = session.get(url)
+        if response.status_code == 200:
+            html = response.text
+            # <title>タイトル - YouTube</title> から抽出
+            if "<title>" in html:
+                start = html.find("<title>") + 7
+                end = html.find("</title>")
+                title = html[start:end].strip()
+                # " - YouTube" を除去
+                if title.endswith(" - YouTube"):
+                    title = title[:-10].strip()
+                return title
+    except:
+        pass
+    return f"(タイトル取得失敗: {video_id})"
+
 def search_transcript(transcript_data, keywords):
     """
     字幕データからキーワードを検索し、結果リストを返す
+    （dict形式とdataclass形式の両方に対応）
     """
     results = []
     for entry in transcript_data:
-        text = entry['text']
-        start_time = entry['start']
+        # dataclass（.text）とdict（['text']）の両方に対応
+        text = entry.text if hasattr(entry, 'text') else entry['text']
+        start_time = entry.start if hasattr(entry, 'start') else entry['start']
         
         # 複数キーワードのいずれかが含まれるか？ (OR検索)
         hit_keywords = []
@@ -55,6 +80,46 @@ def search_transcript(transcript_data, keywords):
                 "keywords": hit_keywords
             })
     return results
+
+def get_authenticated_api():
+    """
+    cookies.txtが存在する場合、読み込んで認証付きのAPIインスタンスを返す
+    """
+    session = requests.Session()
+    # User-Agentを偽装（Bot判定回避のため重要）
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    })
+    cookie_file = 'cookies.txt'
+    
+    if os.path.exists(cookie_file):
+        try:
+            cookie_jar = http.cookiejar.MozillaCookieJar(cookie_file)
+            cookie_jar.load(ignore_discard=True, ignore_expires=True)
+            session.cookies = cookie_jar
+            st.sidebar.success(f"✅ cookies.txt を読み込みました ({len(cookie_jar)} cookies loaded)")
+            
+            # デバッグ: 読み込んだCookieの内訳を表示
+            cookie_preview = []
+            for cookie in cookie_jar:
+                if "youtube" in cookie.domain:
+                    cookie_preview.append(f"{cookie.domain}: {cookie.name}")
+            
+            if cookie_preview:
+                with st.sidebar.expander("読み込んだYouTube Cookie"):
+                    st.sidebar.code("\n".join(cookie_preview))
+            else:
+                 st.sidebar.warning("⚠️ YouTube関連のCookieが見つかりません。")
+        except Exception as e:
+            st.sidebar.error(f"❌ cookies.txt の読み込み失敗: {e}")
+            st.sidebar.warning("※ Netscape形式の cookies.txt である必要があります。")
+            return YouTubeTranscriptApi() 
+    else:
+        st.sidebar.warning("⚠️ cookies.txt が見つかりません。")
+        st.sidebar.caption("プロジェクトフォルダ直下に配置してください。")
+            
+    # http_clientとしてsessionを渡す
+    return YouTubeTranscriptApi(http_client=session)
 
 # --- ページ設定 ---
 st.set_page_config(
@@ -77,6 +142,10 @@ with st.sidebar:
     4. **保存**: 結果をCSVでダウンロードできます。
     """)
     st.info("※ 字幕がない動画や、無効なURLはスキップされます。")
+    
+    # Cookie情報の表示
+    if os.path.exists('cookies.txt'):
+         st.caption("ℹ️ Cookie認証モードで動作中")
 
 # メイン入力エリア（2カラム）
 col1, col2 = st.columns(2)
@@ -117,7 +186,9 @@ if st.button("検索開始 🚀", type="primary", use_container_width=True):
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        api = YouTubeTranscriptApi()
+        # APIインスタンス取得（Cookie対応）
+        api_obj = get_authenticated_api()
+        
         total_urls = len(urls)
         
         for i, url in enumerate(urls):
@@ -134,7 +205,7 @@ if st.button("検索開始 🚀", type="primary", use_container_width=True):
             
             try:
                 # 字幕取得
-                transcript_list = api.list(video_id)
+                transcript_list = api_obj.list(video_id)
                 try:
                      transcript = transcript_list.find_transcript(['ja', 'en', 'en-US'])
                 except:
@@ -142,10 +213,13 @@ if st.button("検索開始 🚀", type="primary", use_container_width=True):
 
                 transcript_data = transcript.fetch()
                 
-                # ★ここで検索ロジック関数を呼び出し★
+                # タイトル取得（APIで使ったsessionを再利用）
+                video_title = fetch_video_title(api_obj._fetcher._http_client, video_id)
+                
+                # 検索ロジック呼び出し
                 found_entries = search_transcript(transcript_data, keywords)
                 
-                # 結果を整形して追加
+                # 結果追加
                 for res in found_entries:
                     start_time = res['seconds']
                     text = res['text']
@@ -155,6 +229,7 @@ if st.button("検索開始 🚀", type="primary", use_container_width=True):
                     link_url = f"https://youtu.be/{video_id}?t={int(start_time)}"
                     
                     results_data.append({
+                        "Title": video_title,
                         "Video ID": video_id,
                         "Original URL": url,
                         "Keyword": ", ".join(hit_keywords),
@@ -185,14 +260,16 @@ if st.button("検索開始 🚀", type="primary", use_container_width=True):
             with tab1:
                 for index, row in df.iterrows():
                     with st.container():
+                        st.markdown(f"**🎬 {row['Title']}**")
                         st.markdown(f"### {row['Time']} (Keyword: {row['Keyword']})")
                         st.markdown(f"[{row['Text']}]({row['Link']})")
                         st.divider()
 
             with tab2:
                 st.dataframe(
-                    df[['Keyword', 'Time', 'Text', 'Link', 'Original URL']],
+                    df[['Title', 'Keyword', 'Time', 'Text', 'Link', 'Original URL']],
                     column_config={
+                        "Title": st.column_config.TextColumn("タイトル"),
                         "Link": st.column_config.LinkColumn("再生リンク", display_text="再生 ▶️"),
                         "Original URL": st.column_config.LinkColumn("動画URL")
                     },

@@ -1,5 +1,16 @@
-
+# Python
 __pycache__/
 *.pyc
+*.pyo
+venv/
+
+# Cookie（セキュリティ上GitHubにアップロードしない）
+cookies.txt
+
+# OS
 .DS_Store
-.streamlit/
+
+# デバッグ用
+debug_*.py
+test_*.py
+verify_*.py
