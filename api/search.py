@@ -25,10 +25,35 @@ USER_AGENT = (
 )
 
 
+def resolve_proxy_url():
+    """
+    プロキシURLを環境変数から解決する（住宅用プロキシ推奨: クラウドIPブロック回避）。
+    優先順位:
+      1. WEBSHARE_PROXY_USERNAME / WEBSHARE_PROXY_PASSWORD  … Webshare住宅用
+      2. PROXY_URL  … 任意のhttp(s)プロキシ (例: http://user:pass@host:port)
+    設定がなければ None（=プロキシなし）。
+    """
+    ws_user = os.environ.get("WEBSHARE_PROXY_USERNAME")
+    ws_pass = os.environ.get("WEBSHARE_PROXY_PASSWORD")
+    if ws_user and ws_pass:
+        host = os.environ.get("WEBSHARE_PROXY_HOST", "p.webshare.io")
+        port = os.environ.get("WEBSHARE_PROXY_PORT", "80")
+        # Webshareの住宅用ローテーションエンドポイント（毎リクエストでIPが変わる）
+        return f"http://{ws_user}-rotate:{ws_pass}@{host}:{port}/"
+
+    generic = os.environ.get("PROXY_URL")
+    if generic:
+        return generic.strip()
+
+    return None
+
+
 def build_session():
     """
-    環境変数 YOUTUBE_COOKIES（Netscape形式のcookies.txtの中身）があれば
-    それを /tmp に書き出して読み込む。Bot判定回避のため User-Agent も偽装。
+    リクエスト用のセッションを構築する。
+    - User-Agent を偽装（Bot判定回避）
+    - YOUTUBE_COOKIES（Netscape形式のcookies.txtの中身）があれば読み込む
+    - プロキシが設定されていれば適用（字幕取得・タイトル取得の両方に効く）
     """
     session = requests.Session()
     session.headers.update({"User-Agent": USER_AGENT})
@@ -45,6 +70,10 @@ def build_session():
         except Exception:
             # Cookieの読み込みに失敗しても、Cookieなしで続行する
             pass
+
+    proxy_url = resolve_proxy_url()
+    if proxy_url:
+        session.proxies = {"http": proxy_url, "https": proxy_url}
 
     return session
 

@@ -14,10 +14,10 @@ YouTube字幕検索アプリを **Vercel**（サーバーレス）で公開す�
 | `requirements.txt` | Vercel関数の依存（`youtube-transcript-api`, `requests`） |
 | `vercel.json` | 関数の実行時間上限などの設定 |
 
-> ⚠️ **重要な制約**
-> Vercelは**データセンターIP**からYouTubeにアクセスするため、Bot判定でブロックされやすいです。
-> `cookies.txt` を環境変数に登録して認証しますが、それでも失敗する場合があります。
-> これはプラットフォームの性質上の限界で、VPS（固定IP）より不利な点です。
+> ⚠️ **重要な制約（必読）**
+> Vercelは**データセンターIP**からYouTubeにアクセスするため、YouTubeにIPブロックされます。
+> これは Cookie では回避できません（IPレベルのブロックのため）。**VPSやStreamlit Cloudでも同じ**です。
+> クラウド上で安定動作させるには **住宅用プロキシ（residential proxy）** が実質必須です（§3.5 参照）。
 
 ---
 
@@ -77,6 +77,43 @@ vercel --prod
 
 ---
 
+## 3.5. 住宅用プロキシの設定（クラウドで動かすなら必須）
+
+YouTubeはクラウドIPをブロックするため、住宅用プロキシ経由でアクセスします。
+`youtube-transcript-api` が公式に推奨している **Webshare** の例を示します。
+
+### 3.5-1. Webshareに登録
+1. https://www.webshare.io/ でアカウント作成
+2. **Residential**（住宅用）プロキシのプランを購入（従量課金・少額から可）
+3. ダッシュボードの **Proxy → Proxy Settings** で **Proxy Username** と **Proxy Password** を控える
+
+> ⚠️ 「Datacenter」ではなく必ず **Residential** を選んでください（Datacenterだとブロックされます）。
+
+### 3.5-2. Vercelに環境変数を登録
+ダッシュボード → **Settings → Environment Variables**、または CLI:
+```bash
+printf '%s' 'あなたのProxyユーザー名' | vercel env add WEBSHARE_PROXY_USERNAME production
+printf '%s' 'あなたのProxyパスワード'   | vercel env add WEBSHARE_PROXY_PASSWORD production
+# Preview / Development にも同様に登録すると、プレビュー環境でも動きます
+```
+登録後は再デプロイ（`vercel --prod`）で反映されます。
+
+### 補足: Webshare以外のプロキシを使う場合
+`WEBSHARE_*` の代わりに `PROXY_URL` を1つ設定すればOKです（http/https両方に適用）:
+```
+PROXY_URL = http://ユーザー名:パスワード@ホスト:ポート
+```
+
+### 対応している環境変数まとめ
+| 変数名 | 用途 |
+|--------|------|
+| `YOUTUBE_COOKIES` | cookies.txt の中身（bot/同意判定回避） |
+| `WEBSHARE_PROXY_USERNAME` / `WEBSHARE_PROXY_PASSWORD` | Webshare住宅用プロキシ |
+| `WEBSHARE_PROXY_HOST` / `WEBSHARE_PROXY_PORT` | （任意）Webshareのエンドポイント上書き。既定 `p.webshare.io:80` |
+| `PROXY_URL` | 任意のhttp(s)プロキシURL（Webshare未使用時） |
+
+---
+
 ## 4. 動作確認
 
 発行されたURL（例: `https://your-app.vercel.app`）にアクセスし、
@@ -100,7 +137,7 @@ URLとキーワードを入れて「検索開始」を押します。
 
 | 症状 | 原因 / 対処 |
 |------|------------|
-| 全動画で字幕取得失敗（bot/IPブロック系エラー） | VercelのIPがブロックされている。Cookieを最新化しても直らない場合は、VPS版(`VPS_DEPLOY.md`)やStreamlit Community Cloud等の方が安定します。 |
+| 全動画で字幕取得失敗（`YouTube is blocking requests from your IP` 等） | VercelのクラウドIPがブロックされている。**§3.5 の住宅用プロキシ**を設定してください。Cookieだけでは直りません（VPSでも同様）。 |
 | 途中でタイムアウト | `vercel.json` の `maxDuration` を確認（Hobbyは最大60秒）。1動画=1リクエストに分割済みなので、字幕が非常に長い動画で発生しやすい。 |
 | `YOUTUBE_COOKIES` が効かない | 環境変数保存後に**再デプロイ**したか確認。値がNetscape形式（`# HTTP Cookie File` から始まる複数行）か確認。 |
 
