@@ -109,5 +109,5 @@ URLとキーワードを入れて「検索開始」を押します。
 ## 補足: ローカルで旧Streamlit版を動かす場合
 ```bash
 pip install -r requirements-local.txt
-streamlit run app.py
+streamlit run legacy/app.py
 ```

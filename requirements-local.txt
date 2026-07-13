@@ -1,6 +1,6 @@
 # ローカルで旧Streamlit版(app.py)を動かす場合のみ使用:
 #   pip install -r requirements-local.txt
-#   streamlit run app.py
+#   streamlit run legacy/app.py
 streamlit
 youtube-transcript-api
 pandas

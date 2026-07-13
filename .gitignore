@@ -14,3 +14,5 @@ cookies.txt
 debug_*.py
 test_*.py
 verify_*.py
+.vercel
+.env*
