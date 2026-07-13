@@ -1,4 +1,2 @@
-
-streamlit
 youtube-transcript-api
-pandas
+requests
